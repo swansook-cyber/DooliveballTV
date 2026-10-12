@@ -1,6 +1,9 @@
 package net.velalab.dooliveballtv;
 
 import android.app.Activity;
+import android.app.UiModeManager;
+import android.content.Context;
+import android.content.res.Configuration;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
@@ -8,6 +11,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -29,6 +34,9 @@ public class MainActivity extends Activity {
     private FrameLayout overlay;
     private View videoView;
     private WebChromeClient.CustomViewCallback videoCallback;
+    private TextView remotePointer;
+    private float pointerX, pointerY;
+    private boolean remoteMode;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -56,6 +64,19 @@ public class MainActivity extends Activity {
         browser = createBrowser();
         browserHost.addView(browser, new FrameLayout.LayoutParams(-1, -1));
         browser.loadUrl(FOOTBALL);
+        UiModeManager mode = (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
+        remoteMode = mode != null && mode.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
+        remotePointer = makeLabel("+", 30, 0xFFFF5C9D, true);
+        remotePointer.setGravity(Gravity.CENTER);
+        remotePointer.setShadowLayer(3f, 1f, 1f, Color.BLACK);
+        remotePointer.setVisibility(remoteMode ? View.VISIBLE : View.GONE);
+        browserHost.addView(remotePointer, new FrameLayout.LayoutParams(dp(46), dp(46)));
+        browserHost.post(() -> {
+            pointerX = browserHost.getWidth() / 2f;
+            pointerY = browserHost.getHeight() / 2f;
+            positionPointer();
+            if (remoteMode) browser.requestFocus();
+        });
 
         overlay = new FrameLayout(this);
         overlay.setBackgroundColor(Color.BLACK);
@@ -120,6 +141,61 @@ public class MainActivity extends Activity {
         try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
         catch (ActivityNotFoundException e) { Toast.makeText(this, "ไม่มีแอปรองรับลิงก์นี้", Toast.LENGTH_SHORT).show(); }
         return true;
+    }
+
+
+    private void positionPointer() {
+        if (remotePointer == null) return;
+        pointerX = Math.max(dp(12), Math.min(browserHost.getWidth() - dp(12), pointerX));
+        pointerY = Math.max(dp(12), Math.min(browserHost.getHeight() - dp(12), pointerY));
+        remotePointer.setX(pointerX - dp(23));
+        remotePointer.setY(pointerY - dp(23));
+    }
+
+    private void tapAtPointer() {
+        long now = android.os.SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, pointerX, pointerY, 0);
+        MotionEvent up = MotionEvent.obtain(now, now + 80, MotionEvent.ACTION_UP, pointerX, pointerY, 0);
+        browser.dispatchTouchEvent(down);
+        browser.dispatchTouchEvent(up);
+        down.recycle();
+        up.recycle();
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if (videoView != null) return super.dispatchKeyEvent(event);
+        int key = event.getKeyCode();
+        boolean control = key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN
+            || key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT
+            || key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER
+            || key == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (control) {
+            if (!remoteMode) {
+                remoteMode = true;
+                remotePointer.setVisibility(View.VISIBLE);
+                pointerX = browserHost.getWidth() / 2f;
+                pointerY = browserHost.getHeight() / 2f;
+            }
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                float step = dp(40);
+                if (key == KeyEvent.KEYCODE_DPAD_UP) pointerY -= step;
+                else if (key == KeyEvent.KEYCODE_DPAD_DOWN) pointerY += step;
+                else if (key == KeyEvent.KEYCODE_DPAD_LEFT) pointerX -= step;
+                else if (key == KeyEvent.KEYCODE_DPAD_RIGHT) pointerX += step;
+                else if (event.getRepeatCount() == 0) tapAtPointer();
+                positionPointer();
+            }
+            return true;
+        }
+        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (key == KeyEvent.KEYCODE_PAGE_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN) {
+                browser.scrollBy(0, browser.getHeight() / 2); return true;
+            }
+            if (key == KeyEvent.KEYCODE_PAGE_UP || key == KeyEvent.KEYCODE_CHANNEL_UP) {
+                browser.scrollBy(0, -browser.getHeight() / 2); return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     private void closeVideo() {
