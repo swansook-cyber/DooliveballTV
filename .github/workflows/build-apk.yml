@@ -22,9 +22,21 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Generate Vela Sport PNG artwork
+        run: |
+          python3 -m pip install --quiet --user cairosvg
+          python3 - <<'PY'
+          import cairosvg
+          from pathlib import Path
+          out = Path('app/src/main/res/drawable')
+          out.mkdir(parents=True, exist_ok=True)
+          cairosvg.svg2png(url='assets/vela-sport-icon.svg', write_to=str(out/'vela_sport_icon.png'), output_width=432, output_height=432)
+          cairosvg.svg2png(url='assets/vela-sport-banner.svg', write_to=str(out/'vela_sport_banner.png'), output_width=640, output_height=360)
+          print('PNG launcher assets generated')
+          PY
       - run: gradle :app:assembleDebug --no-daemon
       - uses: actions/upload-artifact@v4
         with:
-          name: DooliveballTV-debug-apk
+          name: VelaSport-v1.2.0-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
