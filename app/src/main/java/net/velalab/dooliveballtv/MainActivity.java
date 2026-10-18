@@ -37,6 +37,8 @@ public class MainActivity extends Activity {
     private TextView remotePointer;
     private float pointerX, pointerY;
     private boolean remoteMode;
+    private boolean pointerMode = false;
+    private int selected = -1;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -51,7 +53,7 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setPadding(dp(16), 0, dp(12), 0);
         header.setBackgroundColor(Color.rgb(16, 23, 43));
-        TextView brand = makeLabel("▶  DOOLIVEBALL", 17, Color.WHITE, true);
+        TextView brand = makeLabel("▶  VELA SPORT", 17, Color.WHITE, true);
         header.addView(brand, new LinearLayout.LayoutParams(0, dp(52), 1));
         TextView reload = makeLabel("↻", 28, Color.WHITE, false);
         reload.setGravity(Gravity.CENTER);
@@ -69,13 +71,15 @@ public class MainActivity extends Activity {
         remotePointer = makeLabel("+", 30, 0xFFFF5C9D, true);
         remotePointer.setGravity(Gravity.CENTER);
         remotePointer.setShadowLayer(3f, 1f, 1f, Color.BLACK);
-        remotePointer.setVisibility(remoteMode ? View.VISIBLE : View.GONE);
+        remotePointer.setVisibility(View.GONE);
         browserHost.addView(remotePointer, new FrameLayout.LayoutParams(dp(46), dp(46)));
         browserHost.post(() -> {
             pointerX = browserHost.getWidth() / 2f;
             pointerY = browserHost.getHeight() / 2f;
             positionPointer();
-            if (remoteMode) browser.requestFocus();
+            browser.setFocusable(true);
+            browser.setFocusableInTouchMode(true);
+            if (remoteMode) { browser.requestFocus(); moveDomFocus(1); }
         });
 
         overlay = new FrameLayout(this);
@@ -162,28 +166,61 @@ public class MainActivity extends Activity {
         up.recycle();
     }
 
+    // Native key mapping. The website DOM remains the source of navigation.
+    private void moveDomFocus(int direction) {
+        if (browser == null) return;
+        final String js = "(function(){"
+            + "const arr=Array.from(document.querySelectorAll('a[href],button,[role=button],input,select,video,[tabindex]')).filter(e=>{let r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>8&&r.height>8&&s.visibility!=='hidden'&&s.display!=='none'});"
+            + "if(!arr.length){window.scrollBy(0," + (direction * 240) + ");return;}"
+            + "let current=document.activeElement;let idx=arr.indexOf(current);"
+            + "idx=(idx+" + direction + "+arr.length)%arr.length;"
+            + "let e=arr[idx];e.setAttribute('tabindex','0');e.focus({preventScroll:true});e.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});"
+            + "document.querySelectorAll('.vela-tv-focused').forEach(x=>{x.classList.remove('vela-tv-focused');x.style.outline='';x.style.outlineOffset='';});"
+            + "e.classList.add('vela-tv-focused');e.style.outline='4px solid #ff1694';e.style.outlineOffset='3px';"
+            + "})();";
+        browser.evaluateJavascript(js, null);
+    }
+
+    private void activateDomFocus() {
+        if (browser == null) return;
+        browser.evaluateJavascript("(function(){let e=document.activeElement;if(e&&e!==document.body){e.click();if(e.tagName==='VIDEO'){if(e.paused)e.play();else e.pause();}}})();", null);
+    }
+
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        if (videoView != null) return super.dispatchKeyEvent(event);
         int key = event.getKeyCode();
-        boolean control = key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN
-            || key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT
-            || key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER
-            || key == KeyEvent.KEYCODE_NUMPAD_ENTER;
-        if (control) {
-            if (!remoteMode) {
-                remoteMode = true;
-                remotePointer.setVisibility(View.VISIBLE);
-                pointerX = browserHost.getWidth() / 2f;
-                pointerY = browserHost.getHeight() / 2f;
+        if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+            if (event.getAction() == KeyEvent.ACTION_UP) onBackPressed();
+            return true;
+        }
+        if (videoView != null) return super.dispatchKeyEvent(event);
+        if (key == KeyEvent.KEYCODE_MENU || key == KeyEvent.KEYCODE_INFO) {
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                pointerMode = !pointerMode;
+                remotePointer.setVisibility(pointerMode ? View.VISIBLE : View.GONE);
+                Toast.makeText(this, pointerMode ? "โหมดตัวชี้: ใช้ลูกศรและ OK" : "โหมดเลือกเมนู", Toast.LENGTH_SHORT).show();
             }
+            return true;
+        }
+        boolean up = key == KeyEvent.KEYCODE_DPAD_UP;
+        boolean down = key == KeyEvent.KEYCODE_DPAD_DOWN;
+        boolean left = key == KeyEvent.KEYCODE_DPAD_LEFT;
+        boolean right = key == KeyEvent.KEYCODE_DPAD_RIGHT;
+        boolean ok = key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (up || down || left || right || ok) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                float step = dp(40);
-                if (key == KeyEvent.KEYCODE_DPAD_UP) pointerY -= step;
-                else if (key == KeyEvent.KEYCODE_DPAD_DOWN) pointerY += step;
-                else if (key == KeyEvent.KEYCODE_DPAD_LEFT) pointerX -= step;
-                else if (key == KeyEvent.KEYCODE_DPAD_RIGHT) pointerX += step;
-                else if (event.getRepeatCount() == 0) tapAtPointer();
-                positionPointer();
+                if (pointerMode) {
+                    float step = dp(35);
+                    if (up) pointerY -= step;
+                    else if (down) pointerY += step;
+                    else if (left) pointerX -= step;
+                    else if (right) pointerX += step;
+                    else if (event.getRepeatCount() == 0) tapAtPointer();
+                    positionPointer();
+                } else {
+                    if (up || left) moveDomFocus(-1);
+                    else if (down || right) moveDomFocus(1);
+                    else if (event.getRepeatCount() == 0) activateDomFocus();
+                }
             }
             return true;
         }
