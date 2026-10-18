@@ -7,10 +7,10 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true"
-        android:label="Dooliveball TV"
+        android:label="Vela Sport"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:icon="@drawable/ic_launcher"
-        android:banner="@drawable/tv_banner">
+        android:icon="@drawable/vela_sport_icon"
+        android:banner="@drawable/vela_sport_banner">
         <activity android:name=".MainActivity" android:exported="true"
             android:configChanges="orientation|screenSize|keyboardHidden">
             <intent-filter>
