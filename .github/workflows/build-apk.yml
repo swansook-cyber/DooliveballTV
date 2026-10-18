@@ -24,8 +24,9 @@ jobs:
           gradle-version: '8.9'
       - name: Generate Vela Sport PNG artwork
         run: |
-          python3 -m pip install --quiet --user cairosvg
-          python3 - <<'PY'
+          python3 -m venv /tmp/vela-png-env
+          /tmp/vela-png-env/bin/python -m pip install --quiet cairosvg
+          /tmp/vela-png-env/bin/python - <<'PY'
           import cairosvg
           from pathlib import Path
           out = Path('app/src/main/res/drawable')
