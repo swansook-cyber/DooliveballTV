@@ -18,6 +18,10 @@ jobs:
         with:
           node-version: '22'
       - run: node --test tests/tv_navigation.test.js
+      - name: Verify original Vela Sport artwork
+        run: |
+          echo '5aa55493ff9abca4be16375b108c9c1312bff1834c015ab9efe9ee88c31b441f  assets/vela-sport-original.png' | sha256sum -c -
+          cmp assets/vela-sport-original.png app/src/main/res/drawable/vela_sport_icon.png
       - name: Install Android SDK packages
         run: |
           echo "Android SDK: $ANDROID_HOME"
@@ -31,11 +35,12 @@ jobs:
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/vela-badging.txt
-          grep -q "package: name='net.velalab.dooliveballtv' versionCode='4' versionName='1.3.0'" /tmp/vela-badging.txt
+          grep -q "package: name='net.velalab.dooliveballtv' versionCode='5' versionName='1.3.1'" /tmp/vela-badging.txt
           grep -q "application-label:'Vela Sport'" /tmp/vela-badging.txt
+          unzip -p "$APK" res/drawable/vela_sport_icon.png | sha256sum | grep -q '^5aa55493ff9abca4be16375b108c9c1312bff1834c015ab9efe9ee88c31b441f '
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: VelaSport-v1.3.0-debug-apk
+          name: VelaSport-v1.3.1-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
