@@ -2,7 +2,7 @@ name: Build Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [main, master]
+    branches: ['**']
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,6 +14,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test tests/tv_navigation.test.js
       - name: Install Android SDK packages
         run: |
           echo "Android SDK: $ANDROID_HOME"
@@ -22,22 +26,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-      - name: Generate Vela Sport PNG artwork
+      - run: gradle :app:assembleDebug :app:lint --no-daemon
+      - name: Verify APK identity and signature
         run: |
-          python3 -m venv /tmp/vela-png-env
-          /tmp/vela-png-env/bin/python -m pip install --quiet cairosvg
-          /tmp/vela-png-env/bin/python - <<'PY'
-          import cairosvg
-          from pathlib import Path
-          out = Path('app/src/main/res/drawable')
-          out.mkdir(parents=True, exist_ok=True)
-          cairosvg.svg2png(url='assets/vela-sport-icon.svg', write_to=str(out/'vela_sport_icon.png'), output_width=432, output_height=432)
-          cairosvg.svg2png(url='assets/vela-sport-banner.svg', write_to=str(out/'vela_sport_banner.png'), output_width=640, output_height=360)
-          print('PNG launcher assets generated')
-          PY
-      - run: gradle :app:assembleDebug --no-daemon
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee /tmp/vela-badging.txt
+          grep -q "package: name='net.velalab.dooliveballtv' versionCode='4' versionName='1.3.0'" /tmp/vela-badging.txt
+          grep -q "application-label:'Vela Sport'" /tmp/vela-badging.txt
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs "$APK"
       - uses: actions/upload-artifact@v4
         with:
-          name: VelaSport-v1.2.0-debug-apk
+          name: VelaSport-v1.3.0-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

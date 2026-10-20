@@ -7,7 +7,7 @@
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:hardwareAccelerated="true"
-        android:label="Vela Sport"
+        android:label="@string/app_name"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:icon="@drawable/vela_sport_icon"
         android:banner="@drawable/vela_sport_banner">
