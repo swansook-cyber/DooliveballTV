@@ -38,7 +38,8 @@ public class MainActivity extends Activity {
     private float pointerX, pointerY;
     private boolean remoteMode;
     private boolean pointerMode = false;
-    private int selected = -1;
+    private boolean longOkHandled = false;
+    private long okPressedAt = 0L;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -79,7 +80,7 @@ public class MainActivity extends Activity {
             positionPointer();
             browser.setFocusable(true);
             browser.setFocusableInTouchMode(true);
-            if (remoteMode) { browser.requestFocus(); moveDomFocus(1); }
+            if (remoteMode) { browser.requestFocus(); moveDomFocus(0, 1); }
         });
 
         overlay = new FrameLayout(this);
@@ -166,70 +167,100 @@ public class MainActivity extends Activity {
         up.recycle();
     }
 
-    // Native key mapping. The website DOM remains the source of navigation.
-    private void moveDomFocus(int direction) {
+    // Spatial DOM navigation: move to the nearest visible control in the pressed direction.
+    // The pointer remains available for cross-origin iframes and canvas-based players.
+    private void moveDomFocus(int dx, int dy) {
         if (browser == null) return;
-        final String js = "(function(){"
-            + "const arr=Array.from(document.querySelectorAll('a[href],button,[role=button],input,select,video,[tabindex]')).filter(e=>{let r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>8&&r.height>8&&s.visibility!=='hidden'&&s.display!=='none'});"
-            + "if(!arr.length){window.scrollBy(0," + (direction * 240) + ");return;}"
-            + "let current=document.activeElement;let idx=arr.indexOf(current);"
-            + "idx=(idx+" + direction + "+arr.length)%arr.length;"
-            + "let e=arr[idx];e.setAttribute('tabindex','0');e.focus({preventScroll:true});e.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});"
-            + "document.querySelectorAll('.vela-tv-focused').forEach(x=>{x.classList.remove('vela-tv-focused');x.style.outline='';x.style.outlineOffset='';});"
-            + "e.classList.add('vela-tv-focused');e.style.outline='4px solid #ff1694';e.style.outlineOffset='3px';"
+        String js = "(function(){"
+            + "const nodes=Array.from(document.querySelectorAll('a[href],button,[role=button],input,select,video,[tabindex],summary'));"
+            + "const items=nodes.filter(e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>9&&r.height>9&&s.visibility!=='hidden'&&s.display!=='none'&&r.bottom>=0&&r.top<=innerHeight&&r.right>=0&&r.left<=innerWidth});"
+            + "if(!items.length){scrollBy(0," + (dy * 260) + ");return 'empty';}"
+            + "let current=document.activeElement;if(!items.includes(current))current=null;"
+            + "let cr=current?current.getBoundingClientRect():{left:innerWidth/2,right:innerWidth/2,top:innerHeight/2,bottom:innerHeight/2};"
+            + "let x=(cr.left+cr.right)/2,y=(cr.top+cr.bottom)/2;"
+            + "let candidates=items.map(e=>{let r=e.getBoundingClientRect(),cx=(r.left+r.right)/2,cy=(r.top+r.bottom)/2,ox=cx-x,oy=cy-y;"
+            + "let along=ox*" + dx + "+oy*" + dy + ",cross=Math.abs(ox*" + dy + "-oy*" + dx + ");"
+            + "return {e,along,cross,score:along+cross*2.8}}).filter(o=>o.along>4);"
+            + "candidates.sort((a,b)=>a.score-b.score);let next=candidates.length?candidates[0].e:null;"
+            + "if(!next){scrollBy({top:" + (dy * 260) + ",left:" + (dx * 260) + ",behavior:'smooth'});return 'scroll';}"
+            + "if(current){current.classList.remove('vela-focus');current.style.outline='';current.style.outlineOffset='';}"
+            + "next.setAttribute('tabindex','0');next.focus({preventScroll:true});next.scrollIntoView({block:'nearest',inline:'nearest',behavior:'smooth'});"
+            + "next.classList.add('vela-focus');next.style.outline='4px solid #ff1597';next.style.outlineOffset='3px';return 'focused';"
             + "})();";
         browser.evaluateJavascript(js, null);
     }
 
     private void activateDomFocus() {
         if (browser == null) return;
-        browser.evaluateJavascript("(function(){let e=document.activeElement;if(e&&e!==document.body){e.click();if(e.tagName==='VIDEO'){if(e.paused)e.play();else e.pause();}}})();", null);
+        browser.evaluateJavascript("(function(){let e=document.activeElement;if(e&&e!==document.body){e.click();if(e.tagName==='VIDEO'&&e.paused)e.play();return true}return false})();", null);
+    }
+
+    private void togglePointerMode() {
+        pointerMode = !pointerMode;
+        remotePointer.setVisibility(pointerMode ? View.VISIBLE : View.GONE);
+        if (pointerMode) {
+            if (pointerX <= 0 || pointerY <= 0) {
+                pointerX = browserHost.getWidth() / 2f;
+                pointerY = browserHost.getHeight() / 2f;
+            }
+            positionPointer();
+        } else {
+            browser.requestFocus();
+        }
+        Toast.makeText(this, pointerMode ? "โหมดเมาส์: ลูกศรเลื่อน / OK คลิก" : "โหมดเลือกเมนู", Toast.LENGTH_SHORT).show();
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
-        int key = event.getKeyCode();
-        if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
-            if (event.getAction() == KeyEvent.ACTION_UP) onBackPressed();
+        final int key=event.getKeyCode();
+        if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE)
+            return super.dispatchKeyEvent(event);
+        if (videoView != null) return super.dispatchKeyEvent(event);
+        boolean ok=key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER||key==KeyEvent.KEYCODE_NUMPAD_ENTER;
+        boolean up=key==KeyEvent.KEYCODE_DPAD_UP, down=key==KeyEvent.KEYCODE_DPAD_DOWN;
+        boolean left=key==KeyEvent.KEYCODE_DPAD_LEFT, right=key==KeyEvent.KEYCODE_DPAD_RIGHT;
+        if(key==KeyEvent.KEYCODE_MENU||key==KeyEvent.KEYCODE_INFO){
+            if(event.getAction()==KeyEvent.ACTION_UP)togglePointerMode();
             return true;
         }
-        if (videoView != null) return super.dispatchKeyEvent(event);
-        if (key == KeyEvent.KEYCODE_MENU || key == KeyEvent.KEYCODE_INFO) {
-            if (event.getAction() == KeyEvent.ACTION_UP) {
-                pointerMode = !pointerMode;
-                remotePointer.setVisibility(pointerMode ? View.VISIBLE : View.GONE);
-                Toast.makeText(this, pointerMode ? "โหมดตัวชี้: ใช้ลูกศรและ OK" : "โหมดเลือกเมนู", Toast.LENGTH_SHORT).show();
+        if(ok){
+            if(event.getAction()==KeyEvent.ACTION_DOWN){
+                if(event.getRepeatCount()==0){
+                    longOkHandled=false;
+                    okPressedAt=android.os.SystemClock.uptimeMillis();
+                }else if(!longOkHandled && (event.isLongPress() || event.getRepeatCount()>=3)){
+                    longOkHandled=true;
+                    togglePointerMode();
+                }
+            }else if(event.getAction()==KeyEvent.ACTION_UP){
+                if(!longOkHandled && android.os.SystemClock.uptimeMillis()-okPressedAt>=650L){
+                    longOkHandled=true;
+                    togglePointerMode();
+                }
+                if(!longOkHandled){if(pointerMode)tapAtPointer();else activateDomFocus();}
             }
             return true;
         }
-        boolean up = key == KeyEvent.KEYCODE_DPAD_UP;
-        boolean down = key == KeyEvent.KEYCODE_DPAD_DOWN;
-        boolean left = key == KeyEvent.KEYCODE_DPAD_LEFT;
-        boolean right = key == KeyEvent.KEYCODE_DPAD_RIGHT;
-        boolean ok = key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER;
-        if (up || down || left || right || ok) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (pointerMode) {
-                    float step = dp(35);
-                    if (up) pointerY -= step;
-                    else if (down) pointerY += step;
-                    else if (left) pointerX -= step;
-                    else if (right) pointerX += step;
-                    else if (event.getRepeatCount() == 0) tapAtPointer();
+        if(up||down||left||right){
+            if(event.getAction()==KeyEvent.ACTION_DOWN){
+                if(pointerMode){
+                    float step=dp(event.getRepeatCount()>5?75:32);
+                    if(up)pointerY-=step;if(down)pointerY+=step;
+                    if(left)pointerX-=step;if(right)pointerX+=step;
                     positionPointer();
-                } else {
-                    if (up || left) moveDomFocus(-1);
-                    else if (down || right) moveDomFocus(1);
-                    else if (event.getRepeatCount() == 0) activateDomFocus();
+                    if((up&&pointerY<=dp(15))||(down&&pointerY>=browserHost.getHeight()-dp(15)))
+                        browser.scrollBy(0, up?-dp(110):dp(110));
+                }else if(event.getRepeatCount()==0||event.getRepeatCount()%3==0){
+                    moveDomFocus(right?1:left?-1:0,down?1:up?-1:0);
                 }
             }
             return true;
         }
-        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            if (key == KeyEvent.KEYCODE_PAGE_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN) {
-                browser.scrollBy(0, browser.getHeight() / 2); return true;
+        if(event.getAction()==KeyEvent.ACTION_DOWN){
+            if(key==KeyEvent.KEYCODE_PAGE_DOWN||key==KeyEvent.KEYCODE_CHANNEL_DOWN){
+                browser.scrollBy(0,browser.getHeight()/2);return true;
             }
-            if (key == KeyEvent.KEYCODE_PAGE_UP || key == KeyEvent.KEYCODE_CHANNEL_UP) {
-                browser.scrollBy(0, -browser.getHeight() / 2); return true;
+            if(key==KeyEvent.KEYCODE_PAGE_UP||key==KeyEvent.KEYCODE_CHANNEL_UP){
+                browser.scrollBy(0,-browser.getHeight()/2);return true;
             }
         }
         return super.dispatchKeyEvent(event);
